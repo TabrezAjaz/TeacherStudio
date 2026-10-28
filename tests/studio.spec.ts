@@ -34,6 +34,57 @@ async function download(page: BrowserPage, format: string, current = false, anno
   return new Uint8Array(await readFile(path!));
 }
 
+async function visiblePaperPixel(page: BrowserPage, x: number, y: number, width: number, height: number) {
+  const screenshot = await page.locator('.paper').screenshot({ scale: 'css' });
+  return page.evaluate(async ({ bytes, x, y, width, height }) => {
+    const image = await createImageBitmap(new Blob([new Uint8Array(bytes)], { type: 'image/png' }));
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width; canvas.height = image.height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(image, 0, 0);
+      return Array.from(ctx.getImageData(Math.floor(x / width * image.width), Math.floor(y / height * image.height), 1, 1).data);
+    } finally { image.close(); }
+  }, { bytes: Array.from(screenshot), x, y, width, height });
+}
+
+test('PDF content and ink are visibly composited in the workspace, not only in exports', async ({ page }) => {
+  await page.goto('/');
+  await importBytes(page, 'visible-content.pdf', await fixture());
+  const blue = [0, 0, 255, 255], ink = [232, 121, 58, 255];
+  const assertSourceVisible = async (height: number) => {
+    await expect.poll(() => visiblePaperPixel(page, 110, height - 190, 600, height)).toEqual(blue);
+  };
+  await assertSourceVisible(800);
+  await page.getByRole('button', { name: 'Ink #e8793a', exact: true }).click();
+  await page.getByRole('button', { name: 'Straight line', exact: true }).click();
+  const canvas = page.getByTestId('annotation-canvas'), box = (await canvas.boundingBox())!;
+  await page.mouse.move(box.x + 95 / 600 * box.width, box.y + 610 / 800 * box.height);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 145 / 600 * box.width, box.y + 610 / 800 * box.height, { steps: 10 });
+  await page.mouse.up();
+  await expect.poll(() => visiblePaperPixel(page, 120, 610, 600, 800)).toEqual(ink);
+  await expect.poll(() => visiblePaperPixel(page, 110, 590, 600, 800)).toEqual(blue);
+
+  for (const name of ['Highlighter (M)', 'Select / PDF text (V)', 'Pen (P)']) {
+    await page.getByRole('button', { name, exact: true }).click();
+    await expect.poll(() => visiblePaperPixel(page, 110, 590, 600, 800)).toEqual(blue);
+  }
+  await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
+  await expect.poll(() => visiblePaperPixel(page, 110, 590, 600, 800)).toEqual(blue);
+  await expect.poll(() => visiblePaperPixel(page, 120, 610, 600, 800)).toEqual(ink);
+  await page.getByRole('button', { name: 'Next page', exact: true }).click();
+  await expect.poll(() => visiblePaperPixel(page, 110, 410, 800, 600)).toEqual(blue);
+  await page.getByRole('button', { name: 'Previous page', exact: true }).click();
+  await expect.poll(() => visiblePaperPixel(page, 120, 610, 600, 800)).toEqual(ink);
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await expect.poll(() => visiblePaperPixel(page, 110, 590, 600, 800)).toEqual(blue);
+  await page.reload();
+  await page.getByRole('button', { name: 'Open visible-content', exact: true }).click();
+  await expect.poll(() => visiblePaperPixel(page, 110, 590, 600, 800)).toEqual(blue);
+  await expect.poll(() => visiblePaperPixel(page, 120, 610, 600, 800)).toEqual(ink);
+});
+
 test('real handwriting, text, history, library persistence and portable whiteboard exports', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto('/');
@@ -208,6 +259,7 @@ test('image backgrounds, page export, library organization and all-local request
   });
   await importBytes(page, 'teaching-image.png', new Uint8Array(png));
   await expect(page.getByRole('img', { name: 'teaching-image.png' })).toBeVisible();
+  await expect.poll(() => visiblePaperPixel(page, 200, 150, 400, 300)).toEqual([0, 136, 255, 255]);
   const output = await PDFDocument.load(await download(page, 'pdf'));
   expect(output.getPage(0).getSize()).toEqual({ width: 400, height: 300 });
   await page.getByRole('button', { name: 'teaching-image', exact: true }).click();

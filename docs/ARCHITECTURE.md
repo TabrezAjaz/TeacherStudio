@@ -32,6 +32,8 @@ An annotation stores an ID, tool type, page-relative points (including pressure)
 
 SVG object bounds support moving, whole-object hit-testing and bottom-right resize. Text bounds are estimated for selection; export text is rendered by the browser's real font rasterizer. Text remains editable in projects, but is flattened in shared PDF/PNG exports.
 
+The editor uses explicit visual layers inside the paper's isolated stacking context: paper background at 0, positioned PDF canvas/image source at 1, selectable PDF text at 2 and editable SVG annotations at 3. Source layers do not intercept pointer events. This ordering is essential: a positioned opaque background can otherwise paint over an unpositioned PDF canvas even when the canvas appears later in the DOM. Screenshot-pixel tests verify the actual composited workspace, not merely canvas/text-layer existence or exported pixels.
+
 ## Saving and recovery
 
 - IndexedDB database `teacher-studio`, version 1, object store `lessons`, key `id`.

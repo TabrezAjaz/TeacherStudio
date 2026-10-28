@@ -14,7 +14,7 @@ Final verified results (2026-10-28):
 | ESLint | Passed |
 | Vitest | 18 tests passed across 4 files |
 | Edge development acceptance | 6 tests passed |
-| Edge built-production acceptance | 5 tests passed |
+| Edge built-production acceptance | 6 tests passed, including visible PDF/image composition regression |
 | npm audit | 0 known advisories |
 | Independent Edge PDF viewer | Export opened and visually inspected |
 | Native executable / installer / LibreOffice | Blocked by missing system prerequisites |
@@ -42,7 +42,11 @@ npm run test:e2e -- --grep-invert 'multi-page PDF'
 Remove-Item Env:\STUDIO_PREVIEW
 ```
 
-The excluded development-only test dynamically imports the source PDF inspection helper to perform deep export pixel assertions. The other five tests run against the actual production assets, including a separate PDF import/annotate/export/reopen workflow, with no source-module imports.
+The excluded development-only test dynamically imports the source PDF inspection helper to perform deep export pixel assertions. The other six tests run against the actual production assets, including visible document/ink screenshot pixels and a separate PDF import/annotate/export/reopen workflow, with no source-module imports.
+
+### On-screen PDF visibility regression (2026-10-28)
+
+A user-reported blank main document, despite a correct PDF export, exposed a gap in earlier checks: the canvas held the right pixels but an opaque positioned paper background covered it in the displayed page. A new screenshot-based assertion failed on the old build (expected blue source content, observed white), then passed after explicit source/background stacking was applied. It checks source pixels and annotation pixels together through tool changes, zoom, navigation, resize and reopening. The existing image-background workflow now also verifies the displayed pixels. The user's already-open local PDF was visually checked after loading the corrected CSS without reloading or replacing their work.
 
 Unit suite covers:
 
@@ -66,6 +70,7 @@ Browser suite covers:
 - Object selection, movement, resize, deletion, whole-object erasing, undo and zoom invariance.
 - Image backgrounds and PDF size preservation, metadata, folders, search and duplication.
 - A network allowlist that rejects non-local requests, confirming the tested workflows do not request external services.
+- Actual workspace screenshot pixels: original PDF content remains visible beneath ink through drawing, tool changes, zoom, page navigation, window resizing and save/reopen. The regression test reproduces the former white-background occlusion before the layer fix; image backgrounds are also checked in the visible composition.
 
 The suite generates its own original PDF inputs. Maintained fixtures are also included:
 
