@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "appVersion": "0.1.0",
+  "id": "fixture-board",
+  "title": "Editable teaching fixture",
+  "subject": "Computer Science",
+  "grade": "10",
+  "topic": "Algorithms",
+  "folder": "Fixtures",
+  "createdAt": "2026-10-28T00:00:00.000Z",
+  "updatedAt": "2026-10-28T00:00:00.000Z",
+  "kind": "whiteboard",
+  "pages": [
+    {
+      "id": "fixture-page",
+      "width": 1600,
+      "height": 1000,
+      "background": "#fff5ce",
+      "pattern": "dots",
+      "annotations": [
+        {
+          "id": "ink",
+          "type": "pen",
+          "color": "#0d9488",
+          "width": 4,
+          "opacity": 1,
+          "points": [
+            {
+              "x": 100,
+              "y": 200,
+              "pressure": 0.3
+            },
+            {
+              "x": 170,
+              "y": 150,
+              "pressure": 1
+            },
+            {
+              "x": 230,
+              "y": 210,
+              "pressure": 0.5
+            }
+          ]
+        },
+        {
+          "id": "box",
+          "type": "rectangle",
+          "color": "#e8793a",
+          "width": 3,
+          "opacity": 1,
+          "points": [
+            {
+              "x": 400,
+              "y": 150,
+              "pressure": 0.5
+            },
+            {
+              "x": 800,
+              "y": 400,
+              "pressure": 0.5
+            }
+          ]
+        },
+        {
+          "id": "text",
+          "type": "text",
+          "text": "Inputs → processing → outputs",
+          "fontSize": 32,
+          "color": "#173a43",
+          "width": 1,
+          "opacity": 1,
+          "points": [
+            {
+              "x": 100,
+              "y": 550,
+              "pressure": 0.5
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
