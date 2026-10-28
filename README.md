@@ -25,6 +25,12 @@ npm run test:e2e
 
 The acceptance suite uses installed Microsoft Edge through Playwright, so no additional browser download is needed on Windows. The production frontend is generated in `dist`. `npm run preview -- --port 1420` serves that build for local verification. Do not double-click the built HTML: it needs an HTTP origin or the Tauri asset protocol.
 
+## Cloudflare Pages
+
+Create a **separate** Pages project connected to `TabrezAjaz/TeacherStudio`; do not reuse another application's project or custom domain. Use production branch `main`, build command `npm run build`, output directory `dist`, and environment variable `NODE_VERSION=24.14.0`. No backend, bindings, secrets or custom domain are required. The npm script paths work on both Windows and Cloudflare's Linux build environment.
+
+Git pushes to `main` trigger automatic deployments. The free `pages.dev` address hosts only the web version; native save dialogs and LibreOffice conversion still require a built desktop app. Saved lessons belong to the browser's current origin and do not transfer from localhost automatically. This version has no service worker/offline reload cache: the hosted page must load before local editing can be used.
+
 ## Windows desktop build
 
 Install these prerequisites separately:
