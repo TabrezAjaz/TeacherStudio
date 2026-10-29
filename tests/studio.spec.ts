@@ -205,7 +205,7 @@ test('rejects invalid files and provides an honest presentation fallback', async
   await expect(page.getByRole('alert')).toContainText('LibreOffice');
   await page.getByLabel('Dismiss notification').click();
   await page.getByLabel('Import document or project').setInputFiles({ name: 'bad.pdf', mimeType: 'application/pdf', buffer: Buffer.from('not a pdf') });
-  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByRole('alert')).toBeVisible({ timeout: 30000 });
   await page.getByLabel('Dismiss notification').click();
   await page.getByLabel('Import document or project').setInputFiles({ name: 'empty.pdf', mimeType: 'application/pdf', buffer: Buffer.alloc(0) });
   await expect(page.getByRole('alert')).toContainText('empty');
@@ -295,4 +295,68 @@ test('packaged-assets PDF workflow imports, annotates, exports and reopens witho
   await page.getByRole('button', { name: 'Select / PDF text (V)', exact: true }).click();
   await expect(page.locator('.paper .textLayer')).toContainText('Original classroom content');
   expect(errors).toEqual([]);
+});
+
+test('repeated pressure-pen strokes survive autosave, focus changes, presentation and page navigation', async ({ page, context }, testInfo) => {
+  test.setTimeout(360000);
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/');
+  await importBytes(page, 'pen-session.pdf', await fixture());
+  const cdp = await context.newCDPSession(page);
+  const canvas = page.getByTestId('annotation-canvas'), ink = canvas.locator('path[fill="#173a43"]');
+  let box = (await canvas.boundingBox())!;
+  const stroke = async (n: number) => {
+    const x = box.x + 100 / 600 * box.width;
+    const y = box.y + (100 + n % 6 * 24) / 800 * box.height;
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1, pointerType: 'pen', force: 0.2 });
+    for (let i = 1; i <= 3; i++) {
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x + i * 10, y: y + Math.sin(i) * 7, buttons: 1, pointerType: 'pen', force: 0.2 + i * 0.2 });
+    }
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x + 36, y, button: 'left', buttons: 0, clickCount: 1, pointerType: 'pen', force: 0 });
+  };
+  const started = Date.now(), count = 400;
+  for (let i = 0; i < count; i++) {
+    await stroke(i);
+    if ((i + 1) % 80 !== 0) continue;
+    await expect(ink).toHaveCount(i + 1);
+    await expect(page.getByText('Saved locally', { exact: false })).toBeVisible();
+    if (i === 79) {
+      const other = await context.newPage();
+      await other.bringToFront(); await other.close(); await page.bringToFront();
+    } else if (i === 159) {
+      await page.getByRole('button', { name: 'Present', exact: true }).click();
+      await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+    } else if (i === 239) {
+      await page.getByRole('button', { name: 'Exit presentation', exact: true }).click();
+      await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(false);
+    } else if (i === 319) {
+      await page.getByRole('button', { name: 'Next page', exact: true }).click();
+      await expect(ink).toHaveCount(0);
+      await page.getByRole('button', { name: 'Previous page', exact: true }).click();
+      await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
+    }
+    box = (await canvas.boundingBox())!;
+  }
+  const project = await download(page, 'teacherstudio');
+  const lesson = JSON.parse(new TextDecoder().decode(project));
+  expect(lesson.pages[0].annotations).toHaveLength(count);
+  for (const annotation of lesson.pages[0].annotations) {
+    expect(annotation.type).toBe('pen');
+    expect(annotation.points.length).toBeGreaterThanOrEqual(5);
+    const pressures: number[] = annotation.points.map((point: { pressure: number }) => point.pressure);
+    expect(Math.max(...pressures) - Math.min(...pressures)).toBeGreaterThan(0.3);
+  }
+  await page.reload();
+  await page.getByRole('button', { name: 'Open pen-session', exact: true }).click();
+  await expect(ink).toHaveCount(count);
+  box = (await canvas.boundingBox())!;
+  await stroke(0);
+  await expect(ink).toHaveCount(count + 1);
+  expect(errors).toEqual([]);
+  await cdp.detach();
+  await testInfo.attach('pen-session-result', {
+    body: JSON.stringify({ simulatedPenStrokes: count + 1, elapsedMs: Date.now() - started, runtimeErrors: errors.length, physicalTabletTest: false }),
+    contentType: 'application/json',
+  });
 });

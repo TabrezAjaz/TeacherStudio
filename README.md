@@ -55,6 +55,7 @@ The configured NSIS installer is generated under `src-tauri\target\release\bundl
 - PDF import with page thumbnails (rendered only near the thumbnail viewport), single-page lazy rendering, navigation, scroll/pan, zoom, fit width/page and selectable original text.
 - PNG, JPEG and WebP teaching backgrounds; signature, size and image-dimension checks.
 - Smooth pressure-sensitive ink using perfect-freehand; mouse, primary touch and pen pointer events; highlighter, whole-object eraser, text, lines, arrows, rectangles and ellipses.
+- Pointer-owned gestures with recovery after lost capture/focus, cancelled input and missing pen-up; frame-bounded previews and a fallback for empty coalesced-event batches.
 - Object selection, movement, lower-right resize handle, Delete, bounded undo/redo and clear-page confirmation.
 - Temporary laser pointer and full-screen teaching mode for external Google Meet window sharing.
 - Stable page-relative coordinates, including mixed orientations and rotated/cropped PDFs.

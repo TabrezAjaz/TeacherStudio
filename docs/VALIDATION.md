@@ -42,7 +42,7 @@ npm run test:e2e -- --grep-invert 'multi-page PDF'
 Remove-Item Env:\STUDIO_PREVIEW
 ```
 
-The excluded development-only test dynamically imports the source PDF inspection helper to perform deep export pixel assertions. The other six tests run against the actual production assets, including visible document/ink screenshot pixels and a separate PDF import/annotate/export/reopen workflow, with no source-module imports.
+The excluded development-only test dynamically imports the source PDF inspection helper to perform deep export pixel assertions. The other seven tests run against the actual production assets, including visible document/ink screenshot pixels, a separate PDF import/annotate/export/reopen workflow and the sustained simulated-pen session, with no source-module imports.
 
 ### On-screen PDF visibility regression (2026-10-28)
 
@@ -113,5 +113,24 @@ Do not mark presentation support complete until this passes on the desktop build
 ## Performance and scope
 
 No startup, throughput or latency benchmark is claimed. Development test timings vary with system load and are not user-facing performance measurements. Rendering is bounded to one full page and visible thumbnail previews; export is sequential and canvas sizes/history are bounded. The full-record library still needs measurement and possible metadata/source separation for many large lessons.
+
+## Stylus continuity follow-up (2026-10-29)
+
+Real-device testing reported intermittent handwriting failure even though the tablet continued working in Paint. The original automated acceptance focused on short mouse gestures and did not certify sustained tablet input. The supplied photo and the currently shared library screen do not establish which event sequence occurred during that failure; no specific VEIKK driver diagnosis is claimed.
+
+The following input defects were reproduced in new component tests before changing the handler:
+
+- Empty coalesced-event batches discarded move samples instead of using the dispatched event.
+- Gestures had no owning pointer ID, allowing another primary touch to replace or cancel pen work.
+- Lost capture, window blur, hidden-document transitions and missing up events lacked coordinated cleanup.
+- Pen-up could omit its final coordinates; previews were tied to raw move-event frequency rather than animation frames.
+
+The initial eight regressions failed on the previous handler. The expanded suite adds pressure-batch deduplication, dense-move frame scheduling, replacement pointer IDs and pen priority over an unfinished touch. Interrupted sampled ink is now committed once on blur/cancel/lost capture/no-button hover; page/tool/zoom switches still cancel an in-progress preview to avoid mixed coordinates. Draft refs, rather than a potentially stale React preview render, supply committed samples.
+
+A separate Edge/CDP test dispatches **400 pressure-varying pen strokes**, waits for autosaves, changes window focus, enters/exits actual full screen, navigates pages and changes zoom. It exports the editable project and checks every stroke/sample/pressure range, reloads the lesson, then draws a 401st stroke. This uses browser-generated `pointerType: pen` input; it is **not physical tablet certification**, a multi-hour soak, or a handwriting-latency benchmark.
+
+Follow-up verified results: strict TypeScript, production build and ESLint passed; **30 unit/component tests across 5 files passed**, including 12 editor-input cases. All **7 production-browser workflows passed across the final regression and targeted rerun**. The first regression attempt exceeded a 5-second asynchronous invalid-file alert wait and a 240-second pen-test budget; these were not input-count assertion failures. The rerun passed both tests after allowing worker-error latency and reducing test-driver overhead (cached canvas bounds per batch, three pressure moves plus endpoints per stroke). The 401-stroke test completed in approximately 2.3 minutes; this is test-run duration, not a latency benchmark.
+
+Physical retest gate: keep an exported project backup, load the updated build, repeat a real teaching session with the same VEIKK/Windows Ink settings and check behaviour after Alt+Tab, full-screen changes and repeated pen lifts. If the symptom remains, capture the failing event sequence and browser errors before attributing it to a driver or declaring the report resolved.
 
 See the README's limitations before using this as an everyday production tool.

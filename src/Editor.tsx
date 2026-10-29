@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent, type MouseEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent, type MouseEvent } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { AnnotationObject, Background } from './Annotations';
 import { PdfPage } from './PdfPage';
@@ -11,18 +11,55 @@ interface Props {
   onChange(annotations: Annotation[]): void;
   onText(point: Point, annotation?: Annotation): void;
 }
-type Gesture = { start: Point; original: Annotation[]; selected?: Annotation; resizing?: boolean; draft?: Annotation; erased?: Set<string> };
+type Gesture = {
+  start: Point; original: Annotation[]; commit(annotations: Annotation[]): void;
+  selected?: Annotation; resizing?: boolean; draft?: Annotation; erased?: Set<string>;
+};
 
 export default function Editor(props: Props) {
   const { lesson, index, zoom, tool, color, width, opacity, document: doc, selected, onSelect, onChange, onText } = props;
   const page = lesson.pages[index], svg = useRef<SVGSVGElement>(null), scroller = useRef<HTMLDivElement>(null);
   const gesture = useRef<Gesture | null>(null), pan = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  const activePointer = useRef<number | null>(null), frame = useRef<number | null>(null);
+  const activePointerType = useRef<string | null>(null);
+  const previewRef = useRef<Annotation[] | null>(null);
   const [preview, setPreview] = useState<Annotation[] | null>(null);
   const [laser, setLaser] = useState<Point | null>(null);
   const laserTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finish = useCallback((save = true) => {
+    const g = gesture.current, pointerId = activePointer.current, node = svg.current;
+    const result = g?.draft ? [...g.original, { ...g.draft, points: [...g.draft.points] }] : previewRef.current;
+    gesture.current = null; pan.current = null; activePointer.current = null; activePointerType.current = null; previewRef.current = null;
+    if (frame.current !== null) cancelAnimationFrame(frame.current);
+    frame.current = null;
+    setPreview(null);
+    if (pointerId !== null && node?.hasPointerCapture(pointerId)) node.releasePointerCapture(pointerId);
+    if (save && g && result) g.commit(result);
+    return save ? result : null;
+  }, []);
+  const queuePreview = () => {
+    if (frame.current !== null) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = null;
+      const g = gesture.current;
+      setPreview(g?.draft ? [...g.original, { ...g.draft, points: [...g.draft.points] }] : previewRef.current);
+    });
+  };
   useEffect(() => {
-    gesture.current = null; setPreview(null); onSelect(null);
-  }, [page.id, tool, onSelect]);
+    finish(false); onSelect(null);
+  }, [page.id, tool, onSelect, finish]);
+  useEffect(() => { finish(false); }, [zoom, finish]);
+  useEffect(() => {
+    const blur = () => { finish(); };
+    const hidden = () => { if (window.document.visibilityState === 'hidden') finish(); };
+    window.addEventListener('blur', blur);
+    window.document.addEventListener('visibilitychange', hidden);
+    return () => {
+      window.removeEventListener('blur', blur);
+      window.document.removeEventListener('visibilitychange', hidden);
+      finish(false);
+    };
+  }, [finish]);
   useEffect(() => () => { if (laserTimer.current) clearTimeout(laserTimer.current); }, []);
   const at = (event: PointerEvent<SVGSVGElement> | MouseEvent<SVGSVGElement>): Point => documentPoint(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), page.width, page.height, 'pressure' in event ? event.pressure : 0.5);
   const markLaser = (point: Point) => {
@@ -32,14 +69,20 @@ export default function Editor(props: Props) {
   };
   const down = (event: PointerEvent<SVGSVGElement>) => {
     if (event.button !== 0 || !event.isPrimary) return;
+    const penTakeover = event.pointerType === 'pen' && activePointerType.current !== 'pen';
+    if (activePointer.current !== null && activePointer.current !== event.pointerId && activePointerType.current !== event.pointerType && !penTakeover) return;
+    const completed = activePointer.current !== null ? finish(!penTakeover) : null;
     const p = at(event);
+    event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
+    activePointer.current = event.pointerId;
+    activePointerType.current = event.pointerType;
     if (tool === 'laser') { markLaser(p); return; }
     if (tool === 'pan') {
       if (scroller.current) pan.current = { x: event.clientX, y: event.clientY, left: scroller.current.scrollLeft, top: scroller.current.scrollTop };
       return;
     }
-    const objects = page.annotations;
+    const objects = completed ?? page.annotations;
     if (tool === 'text') {
       const existing = [...objects].reverse().find(a => a.type === 'text' && hitTest(a, p));
       onText(p, existing); return;
@@ -50,23 +93,24 @@ export default function Editor(props: Props) {
       const resizing = b && Math.hypot(p.x - b.x - b.width, p.y - b.y - b.height) < 14 / zoom;
       const target = resizing ? current : [...objects].reverse().find(a => hitTest(a, p, 8 / zoom));
       onSelect(target?.id ?? null);
-      if (target) gesture.current = { start: p, original: objects, selected: target, resizing: !!resizing };
+      if (target) gesture.current = { start: p, original: objects, commit: onChange, selected: target, resizing: !!resizing };
       return;
     }
     if (tool === 'eraser') {
       const erased = new Set(objects.filter(a => hitTest(a, p, width + 5 / zoom)).map(a => a.id));
-      gesture.current = { start: p, original: objects, erased };
-      setPreview(objects.filter(a => !erased.has(a.id)));
+      gesture.current = { start: p, original: objects, commit: onChange, erased };
+      previewRef.current = objects.filter(a => !erased.has(a.id));
+      queuePreview();
       return;
     }
     const draft: Annotation = {
       id: crypto.randomUUID(), type: tool, points: [p], color,
       width: tool === 'highlighter' ? width * 5 : width, opacity: tool === 'highlighter' ? Math.min(opacity, 0.35) : opacity,
     };
-    gesture.current = { start: p, original: objects, draft };
-    setPreview([...objects, draft]);
+    gesture.current = { start: p, original: objects, commit: onChange, draft };
+    queuePreview();
   };
-  const move = (event: PointerEvent<SVGSVGElement>) => {
+  const updateGesture = (event: PointerEvent<SVGSVGElement>) => {
     if (pan.current && scroller.current) {
       scroller.current.scrollLeft = pan.current.left - event.clientX + pan.current.x;
       scroller.current.scrollTop = pan.current.top - event.clientY + pan.current.y; return;
@@ -77,16 +121,16 @@ export default function Editor(props: Props) {
     if (!g) return;
     if (g.erased) {
       for (const object of g.original) if (hitTest(object, p, width + 5 / zoom)) g.erased.add(object.id);
-      setPreview(g.original.filter(a => !g.erased!.has(a.id)));
+      previewRef.current = g.original.filter(a => !g.erased!.has(a.id));
     } else if (g.selected) {
       const b = bounds(g.selected);
       const transformed = g.resizing ? resize(g.selected, p.x - b.x, p.y - b.y) : translate(g.selected, p.x - g.start.x, p.y - g.start.y);
-      setPreview(g.original.map(a => a.id === transformed.id ? transformed : a));
+      previewRef.current = g.original.map(a => a.id === transformed.id ? transformed : a);
     } else if (g.draft) {
       const draft = g.draft;
       if (draft.type === 'pen' || draft.type === 'highlighter') {
         const native = event.nativeEvent;
-        const events = native.getCoalescedEvents?.() ?? [native];
+        const events = [...(native.getCoalescedEvents?.() ?? []), native];
         const rect = event.currentTarget.getBoundingClientRect();
         const additions = events.map(e => documentPoint(e.clientX, e.clientY, rect, page.width, page.height, e.pressure));
         for (const point of additions) {
@@ -94,19 +138,26 @@ export default function Editor(props: Props) {
           if (Math.hypot(point.x - last.x, point.y - last.y) >= 0.5) draft.points.push(point);
         }
       } else draft.points = [g.start, p];
-      setPreview([...g.original, { ...draft, points: [...draft.points] }]);
     }
+    queuePreview();
+  };
+  const move = (event: PointerEvent<SVGSVGElement>) => {
+    if (activePointer.current === null) {
+      if (tool === 'laser' && event.isPrimary) markLaser(at(event));
+      return;
+    }
+    if (activePointer.current !== event.pointerId) return;
+    if (!(event.buttons & 1)) { finish(); return; }
+    event.preventDefault();
+    updateGesture(event);
   };
   const end = (event: PointerEvent<SVGSVGElement>) => {
-    if (gesture.current) {
-      const g = gesture.current;
-      if (g.draft) {
-        const draft = { ...g.draft, points: [...g.draft.points] };
-        onChange([...g.original, draft]);
-      } else if (preview) onChange(preview);
-    }
-    gesture.current = null; pan.current = null; setPreview(null);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (activePointer.current !== event.pointerId) return;
+    updateGesture(event);
+    finish();
+  };
+  const interrupted = (event: PointerEvent<SVGSVGElement>) => {
+    if (activePointer.current === event.pointerId) finish();
   };
   const objects = preview ?? page.annotations;
   const selection = objects.find(a => a.id === selected), box = selection && bounds(selection);
@@ -120,7 +171,7 @@ export default function Editor(props: Props) {
           style={{ pointerEvents: tool === 'select' && !selected && doc ? 'none' : 'auto' }}
           viewBox={`0 0 ${page.width} ${page.height}`}
           onPointerDown={down} onPointerMove={move} onPointerUp={end}
-          onPointerCancel={() => { gesture.current = null; pan.current = null; setPreview(null); }}
+          onPointerCancel={interrupted} onLostPointerCapture={interrupted}
           onDoubleClick={e => {
             const point = at(e), object = [...objects].reverse().find(a => hitTest(a, point));
             if (object?.type === 'text') onText(point, object);
